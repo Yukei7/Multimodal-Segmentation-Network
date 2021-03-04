@@ -1,3 +1,7 @@
+# image folder
+brats19/
+brats19_h5/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
