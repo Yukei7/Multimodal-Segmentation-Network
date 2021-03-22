@@ -19,7 +19,9 @@ def epoch_train(train_loader, model, criterion, optimizer, epoch, n_gpus=None, p
     model.train()
     end = time.time()
 
-    for idx, (im, label) in enumerate(train_loader):
+    for idx, patient in enumerate(train_loader):
+        im = patient["image"]
+        label = patient["mask"]
         data_time.update(time.time() - end)
         if n_gpus:
             torch.cuda.empty_cache()
@@ -46,11 +48,14 @@ def epoch_train(train_loader, model, criterion, optimizer, epoch, n_gpus=None, p
 
 
 def batch_loss(model, im, label, criterion, n_gpus=0):
+    # TODO: type?
+    im = im.type(torch.FloatTensor)
+    label = label.type(torch.FloatTensor)
     if n_gpus is not None:
         im = im.cuda()
         label = label.cuda()
     output = model(im)
-    batch_size = im.size[0]
+    batch_size = im.shape[0]
     loss = criterion(output, label)
     return loss, batch_size
 
@@ -63,7 +68,9 @@ def epoch_validation(val_loader, model, criterion, n_gpus=None, print_freq=1):
     model.eval()
     with torch.no_grad():
         end = time.time()
-        for idx, (im, label) in enumerate(val_loader):
+        for idx, patient in enumerate(val_loader):
+            im = patient["image"]
+            label = patient["mask"]
             loss, batch_size = batch_loss(model, im, label, criterion, n_gpus)
             losses.update(loss.item(), batch_size)
             batch_time.update(time.time() - end)

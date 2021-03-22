@@ -1,4 +1,4 @@
-import argparse
+import json
 import pandas as pd
 import numpy as np
 import os
@@ -13,43 +13,28 @@ import pandas as pd
 from torchvision.models.segmentation import fcn, deeplabv3
 import torchvision
 
-from net import unet
+from net import unet3d
 from loss import DiceLoss
 from utils import epoch_train, epoch_validation
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--input", type=str, default="brats19_h5")
-parser.add_argument("--seed", type=int, default=2021)
-parser.add_argument("--testratio", type=float, default=0.8)
-parser.add_argument("--nsplits", type=int, default=5)
-parser.add_argument("--epoch", type=int, default=50)
-parser.add_argument("--net", type=str, default="unet")
-parser.add_argument("--lr", type=float, default=1e-4)
-parser.add_argument("--ngpus", type=int, default=1)
-parser.add_argument("--log", type=str, default="log.csv")
-parser.add_argument("--modelpath", type=str, default="checkpoint")
-args = parser.parse_args()
 
-
-def main():
+def main(args):
     # CPU/GPU config
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     # split train set and test set
-    dataset = BratsDataset(args.input, modal='all')
+    dataset = BratsDataset(args["input"], modal='all')
     n_modals = dataset.n_modals
-    train_idx, test_idx = train_test_split(list(range(len(dataset))), test_size=args.testratio)
+    train_idx, test_idx = train_test_split(list(range(len(dataset))), test_size=args["testratio"])
     datasets = {x: data.Subset(dataset, y)
                 for (x, y) in [("train", train_idx), ("test", test_idx)]}
     del dataset
 
     # Net config
-    if args.net == "unet":
-        model = unet.UNet(in_channels=n_modals,
-                          filter_num_list=[16, 32, 48, 64, 96],
-                          class_num=4,
-                          net_mode='3d')
+    if args["net"] == "unet3d":
+        # multimodal
+        model = unet3d.UNet3d(4, 3, 24).to(device)
     else:
         raise NotImplementedError("Net unfounded! Please check the input name and the net file.")
 
@@ -57,35 +42,39 @@ def main():
     dice_loss = DiceLoss()
 
     # optimizer
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args["lr"])
 
     # k-fold cross-val
-    kf = KFold(args.nsplits)
+    kf = KFold(args["nsplits"])
     fold_counter = 1
     for train_idx, val_idx in kf.split(datasets["train"]):
-        print(f"Fold [{fold_counter}/{args.nsplits}]:")
+        print(f"Fold [{fold_counter}/{args['nsplits']}]:")
         # k-fold
-        trainset, valset = data.Subset(datasets["train"], train_idx), data.Subset(datasets["train"], val_idx)
-        train_dataloader = data.DataLoader(trainset, 8, shuffle=True, num_workers=4)
-        val_dataloader = data.DataLoader(valset, 8, shuffle=False, num_workers=4)
-        model_file_name = os.path.join(args.modelpath, f"{args.net}_fold_{fold_counter}.h5")
+        trainset = data.Subset(datasets["train"], train_idx)
+        valset = data.Subset(datasets["train"], val_idx)
+        train_dataloader = data.DataLoader(trainset, 4, shuffle=True, num_workers=4)
+        val_dataloader = data.DataLoader(valset, 4, shuffle=False, num_workers=4)
+        model_file_name = os.path.join(args["modelpath"], f"{args['net']}_fold_{fold_counter}.h5")
         train(model=model,
               optimizer=optimizer,
               criterion=dice_loss,
-              n_epochs=args.epoch,
+              n_epochs=args["epoch"],
               training_loader=train_dataloader,
               validation_loader=val_dataloader,
-              n_gpus=args.ngpus,
-              training_log_filename=f"{args.net}_{args.log}",
+              n_gpus=args["ngpus"],
+              training_log_filename=f"{args['net']}_{args['log']}",
               model_filename=model_file_name)
         fold_counter += 1
 
 
 def init():
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if not os.path.exists(args.modelpath):
-        os.mkdir(args.modelpath)
+    with open("config.json", "r") as f:
+        args = json.load(f)
+    np.random.seed(args["seed"])
+    torch.manual_seed(args["seed"])
+    if not os.path.exists(args["modelpath"]):
+        os.mkdir(args["modelpath"])
+    return args
 
 
 def train(model, optimizer, criterion, n_epochs, training_loader, validation_loader,
@@ -155,5 +144,5 @@ def get_lr(optimizer):
 
 
 if __name__ == "__main__":
-    init()
-    main()
+    args = init()
+    main(args)

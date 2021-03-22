@@ -1,0 +1,12 @@
+{
+  "input": "brats19",
+  "seed": 2021,
+  "testratio": 0.8,
+  "nsplits": 5,
+  "epoch": 50,
+  "net": "unet3d",
+  "lr": 1e-4,
+  "ngpus": 1,
+  "log": "log.csv",
+  "modelpath": "checkpoint"
+}
