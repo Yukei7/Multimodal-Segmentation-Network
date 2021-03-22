@@ -46,7 +46,10 @@ def main():
 
     # Net config
     if args.net == "unet":
-        model = unet.UNet(in_channels=n_modals, out_channels=4)
+        model = unet.UNet(in_channels=n_modals,
+                          filter_num_list=[16, 32, 48, 64, 96],
+                          class_num=4,
+                          net_mode='3d')
     else:
         raise NotImplementedError("Net unfounded! Please check the input name and the net file.")
 
