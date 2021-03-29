@@ -23,18 +23,23 @@ def main(args):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
+    # get number of samples
+    df = pd.read(os.path.join(args["input"], "name_mapping.csv"))
     # split train set and test set
-    dataset = BratsDataset(args["input"], modal='all')
-    n_modals = dataset.n_modals
-    train_idx, test_idx = train_test_split(list(range(len(dataset))), test_size=args["testratio"])
-    datasets = {x: data.Subset(dataset, y)
+    train_idx, test_idx = train_test_split(list(range(df.shape[0])),
+                                           test_size=args["testratio"],
+                                           random_state=args["seed"])
+    datasets = {x: BratsDataset(folder=args["input"],
+                                modal=args["modal"],
+                                fileidx=y,
+                                phase=x)
                 for (x, y) in [("train", train_idx), ("test", test_idx)]}
-    del dataset
+    n_modals = 4 if args["modal"] == "all" else 1
 
     # Net config
     if args["net"] == "unet3d":
         # multimodal
-        model = unet3d.UNet3d(4, 3, 24).to(device)
+        model = unet3d.UNet3d(in_channels=n_modals, n_classes=3, n_channels=24).to(device)
     else:
         raise NotImplementedError("Net unfounded! Please check the input name and the net file.")
 
@@ -49,11 +54,21 @@ def main(args):
     fold_counter = 1
     for train_idx, val_idx in kf.split(datasets["train"]):
         print(f"Fold [{fold_counter}/{args['nsplits']}]:")
+        print(f"Train: {train_idx.shape}, Val:{val_idx.shape}")
         # k-fold
         trainset = data.Subset(datasets["train"], train_idx)
         valset = data.Subset(datasets["train"], val_idx)
-        train_dataloader = data.DataLoader(trainset, 4, shuffle=True, num_workers=4)
-        val_dataloader = data.DataLoader(valset, 4, shuffle=False, num_workers=4)
+        train_dataloader = data.DataLoader(dataset=trainset,
+                                           batch_size=args["bs"],
+                                           shuffle=True,
+                                           num_workers=args["num_workers"],
+                                           pin_memory=True)
+        val_dataloader = data.DataLoader(dataset=valset,
+                                         batch_size=args["bs"],
+                                         shuffle=False,
+                                         num_workers=args["num_workers"],
+                                         pin_memory=True)
+        # save model for each fold
         model_file_name = os.path.join(args["modelpath"], f"{args['net']}_fold_{fold_counter}.h5")
         train(model=model,
               optimizer=optimizer,
@@ -68,10 +83,13 @@ def main(args):
 
 
 def init():
+    # read config from json file
     with open("config.json", "r") as f:
         args = json.load(f)
+    # seed everything
     np.random.seed(args["seed"])
     torch.manual_seed(args["seed"])
+    # create checkpoint directory if not exists
     if not os.path.exists(args["modelpath"]):
         os.mkdir(args["modelpath"])
     return args
@@ -79,9 +97,11 @@ def init():
 
 def train(model, optimizer, criterion, n_epochs, training_loader, validation_loader,
           training_log_filename, metric_to_monitor="val_loss", n_gpus=1, decay_factor=0.1,
-          lr_decay_step=3, min_lr=1e-8, model_filename=None):
+          lr_decay_step=3, min_lr=1e-8, model_filename=None, use_scheduler=True):
     # Train Log
     training_log = list()
+    # If csv found, continue from the point where it stops last time
+    # TODO: I haven't implement the method to read model from last checkpoint
     if os.path.exists(training_log_filename):
         training_log.extend(pd.read_csv(training_log_filename).values)
         start_epoch = int(training_log[-1][0]) + 1
@@ -94,11 +114,14 @@ def train(model, optimizer, criterion, n_epochs, training_loader, validation_loa
                                                            patience=lr_decay_step,
                                                            factor=decay_factor,
                                                            min_lr=min_lr)
-
     # Go through each epoch
     for epoch in range(start_epoch, n_epochs):
-        loss = epoch_train(training_loader, model, criterion, optimizer, epoch=epoch, n_gpus=n_gpus)
-
+        loss = epoch_train(train_loader=training_loader,
+                           model=model,
+                           criterion=criterion,
+                           optimizer=optimizer,
+                           epoch=epoch,
+                           n_gpus=n_gpus)
         try:
             training_loader.dataset.on_epoch_end()
         except AttributeError:
@@ -117,7 +140,7 @@ def train(model, optimizer, criterion, n_epochs, training_loader, validation_loa
         min_epoch = np.asarray(training_log)[:, training_log_header.index(metric_to_monitor)].argmin()
 
         # Scheduler: adjust lr
-        if scheduler:
+        if use_scheduler:
             if validation_loader and scheduler.__class__ == torch.optim.lr_scheduler.ReduceLROnPlateau:
                 scheduler.step(val_loss)
             elif scheduler.__class__ == torch.optim.lr_scheduler.ReduceLROnPlateau:

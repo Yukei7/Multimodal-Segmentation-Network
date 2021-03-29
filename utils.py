@@ -5,10 +5,10 @@ from torch.autograd import Variable
 from collections import OrderedDict
 import numpy as np
 import time
+from meters import AverageMeter, ProgressMeter
 
 
 # https://github.com/ellisdg/3DUnetCNN
-
 def epoch_train(train_loader, model, criterion, optimizer, epoch, n_gpus=None, print_freq=1):
     # Log loading time and loss for each epoch
     batch_time = AverageMeter("Time", ":6.3f")
@@ -197,40 +197,12 @@ def summary_string(model, input_size, batch_size=-1, device=torch.device('cuda:0
     return summary_str, (total_params, trainable_params)
 
 
-class AverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self, name, fmt=':f'):
-        self.name = name
-        self.fmt = fmt
-        self.reset()
-
-    def reset(self):
-        self.val, self.avg, self.sum, self.count = 0, 0, 0, 0
-
-    def update(self, val, n=1):
-        self.val = val
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-    def __str__(self):
-        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
-        return fmtstr.format(**self.__dict__)
-
-
-class ProgressMeter(object):
-    def __init__(self, num_batches, meters, prefix=""):
-        self.batch_fmtstr = self._get_batch_fmtstr(num_batches)
-        self.meters = meters
-        self.prefix = prefix
-
-    def display(self, batch):
-        entries = [self.prefix + self.batch_fmtstr.format(batch)]
-        entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
-
-    def _get_batch_fmtstr(self, num_batches):
-        num_digits = len(str(num_batches // 1))
-        fmt = '{:' + str(num_digits) + 'd}'
-        return '[' + fmt + '/' + fmt.format(num_batches) + ']'
+def calculate_stats(images):
+    """
+    Calculates min, max, mean, std given a list of ndarrays
+    """
+    # flatten first since the images might not be the same size
+    flat = np.concatenate(
+        [img.ravel() for img in images]
+    )
+    return np.min(flat), np.max(flat), np.mean(flat), np.std(flat)

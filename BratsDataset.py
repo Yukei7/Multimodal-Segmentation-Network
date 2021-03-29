@@ -5,16 +5,22 @@ import numpy as np
 import pandas as pd
 import glob
 from skimage.transform import resize
+from transforms import get_augmentations
 
 
 class BratsDataset(data.Dataset):
-    def __init__(self, folder, modal='all', transform=None):
+    def __init__(self, folder, fileidx, modal='all', phase="train"):
         self.df = pd.read_csv(os.path.join(folder, "name_mapping.csv"))
         self.files, self.files_id = self.get_file_list(folder)
-        self.transform = transform
         self.modal = modal
+        self.phase = phase
         assert self.modal in ['all', 't1', 't1ce', 'flair', 't2']
+        assert self.phase in ["train", "test", "validation"]
         self.n_modals = 4 if self.modal == 'all' else 1
+        # get file from file idx
+        self.files, self.files_id = self.files[fileidx], self.files_id[fileidx]
+        # augmentation
+        self.transform = get_augmentations(self.phase, self.files)
 
     def __len__(self):
         return len(self.files)
@@ -67,7 +73,7 @@ class BratsDataset(data.Dataset):
         y = np.clip(y, 0, 1)
         y = self.preprocess_mask_labels(y)
 
-        if self.transform:
+        if self.transform and self.phase == "train":
             augmented = self.transform(image=X.astype(np.float32),
                                        mask=y.astype(np.float32))
 
