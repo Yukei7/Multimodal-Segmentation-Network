@@ -14,8 +14,9 @@ def epoch_train(train_loader, model, criterion, optimizer, epoch, n_gpus=None, p
     batch_time = AverageMeter("Time", ":6.3f")
     data_time = AverageMeter("Data", ":6.3f")
     losses = AverageMeter("Loss", ":.4e")
-    progress = ProgressMeter(len(train_loader), [batch_time, data_time, losses], prefix=f"Epoch: [{epoch}]")
-
+    progress = ProgressMeter(len(train_loader),
+                             [batch_time, data_time, losses],
+                             prefix=f"Epoch: [{epoch + 1}]")
     model.train()
     end = time.time()
 
@@ -27,8 +28,11 @@ def epoch_train(train_loader, model, criterion, optimizer, epoch, n_gpus=None, p
             torch.cuda.empty_cache()
 
         optimizer.zero_grad()
-        loss, batch_size = batch_loss(model=model, im=im, label=label, criterion=criterion, n_gpus=n_gpus)
-
+        loss, batch_size = batch_loss(model=model,
+                                      im=im,
+                                      label=label,
+                                      criterion=criterion,
+                                      n_gpus=n_gpus)
         if n_gpus:
             torch.cuda.empty_cache()
 
@@ -63,7 +67,9 @@ def batch_loss(model, im, label, criterion, n_gpus=0):
 def epoch_validation(val_loader, model, criterion, n_gpus=None, print_freq=1):
     losses = AverageMeter("Loss", ":.4e")
     batch_time = AverageMeter("Time", ":6.3f")
-    progress = ProgressMeter(len(val_loader), [batch_time, losses], prefix="Validation: ")
+    progress = ProgressMeter(num_batches=len(val_loader),
+                             meters=[batch_time, losses],
+                             prefix="Validation: ")
 
     model.eval()
     with torch.no_grad():
@@ -206,3 +212,12 @@ def calculate_stats(images):
         [img.ravel() for img in images]
     )
     return np.min(flat), np.max(flat), np.mean(flat), np.std(flat)
+
+
+def minmax_normalize(img_npy):
+    '''
+    img_npy: ndarray
+    '''
+    min_value = np.min(img_npy)
+    max_value = np.max(img_npy)
+    return (img_npy - min_value) / (max_value - min_value)

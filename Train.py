@@ -24,7 +24,7 @@ def main(args):
     device = torch.device("cuda:0" if use_cuda else "cpu")
 
     # get number of samples
-    df = pd.read(os.path.join(args["input"], "name_mapping.csv"))
+    df = pd.read_csv(os.path.join(args["input"], "name_mapping.csv"))
     # split train set and test set
     train_idx, test_idx = train_test_split(list(range(df.shape[0])),
                                            test_size=args["testratio"],
@@ -38,8 +38,8 @@ def main(args):
 
     # Net config
     if args["net"] == "unet3d":
-        # multimodal
-        model = unet3d.UNet3d(in_channels=n_modals, n_classes=3, n_channels=24).to(device)
+        # multimodal 3d-unet
+        model = unet3d.UNet3d(in_channels=n_modals, n_classes=3, n_channels=32).to(device)
     else:
         raise NotImplementedError("Net unfounded! Please check the input name and the net file.")
 
@@ -74,10 +74,11 @@ def main(args):
               optimizer=optimizer,
               criterion=dice_loss,
               n_epochs=args["epoch"],
+              fold_count=fold_counter,
               training_loader=train_dataloader,
               validation_loader=val_dataloader,
               n_gpus=args["ngpus"],
-              training_log_filename=f"{args['net']}_{args['log']}",
+              training_log_filename=f"{args['net']}_fold{fold_counter}_{args['log']}",
               model_filename=model_file_name)
         fold_counter += 1
 
@@ -96,8 +97,9 @@ def init():
 
 
 def train(model, optimizer, criterion, n_epochs, training_loader, validation_loader,
-          training_log_filename, metric_to_monitor="val_loss", n_gpus=1, decay_factor=0.1,
-          lr_decay_step=3, min_lr=1e-8, model_filename=None, use_scheduler=True):
+          training_log_filename, fold_count, metric_to_monitor="val_loss", n_gpus=1,
+          decay_factor=0.5, lr_decay_step=2, min_lr=1e-7, model_filename=None,
+          use_scheduler=True):
     # Train Log
     training_log = list()
     # If csv found, continue from the point where it stops last time
@@ -151,7 +153,7 @@ def train(model, optimizer, criterion, n_epochs, training_loader, validation_loa
         # Save the best one
         torch.save(model.state_dict(), model_filename)
         if min_epoch == len(training_log) - 1:
-            best_filename = model_filename.replace(".h5", f"_epoch_{epoch}.h5")
+            best_filename = model_filename.replace(".h5", f"_best.h5")
             forced_copy(model_filename, best_filename)
 
 

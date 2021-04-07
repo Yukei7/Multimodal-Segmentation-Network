@@ -6,19 +6,26 @@ import pandas as pd
 import glob
 from skimage.transform import resize
 from transforms import get_augmentations
+from progressbar import ProgressBar
+import pickle
+from utils import minmax_normalize
 
 
 class BratsDataset(data.Dataset):
-    def __init__(self, folder, fileidx, modal='all', phase="train"):
+    def __init__(self, folder, fileidx, stat_file="train_ds.pkl", modal='all', phase="train",
+                 offset=0.1, mul_factor=100):
         self.df = pd.read_csv(os.path.join(folder, "name_mapping.csv"))
+        # get files path and related ids
         self.files, self.files_id = self.get_file_list(folder)
-        self.modal = modal
+        assert modal in ['all', 't1', 't1ce', 'flair', 't2']
+        assert phase in ["train", "test"]
         self.phase = phase
-        assert self.modal in ['all', 't1', 't1ce', 'flair', 't2']
-        assert self.phase in ["train", "test", "validation"]
-        self.n_modals = 4 if self.modal == 'all' else 1
+        self.modal = ['t1', 't1ce', 'flair', 't2'] if modal == 'all' else [modal]
+        self.n_modals = len(self.modal)
         # get file from file idx
         self.files, self.files_id = self.files[fileidx], self.files_id[fileidx]
+        # get the stat for normalization
+        self.avg_std_values = self.get_ds_stat(stat_file)
         # augmentation
         self.transform = get_augmentations(self.phase, self.files)
 
@@ -29,14 +36,14 @@ class BratsDataset(data.Dataset):
         file = self.files[item]
         X, y = self.read_and_preprocess(file)
         # test for single modal and multimodal
-        if self.modal == 't1':
-            X = X[0, :, :, :]
-        elif self.modal == 't1ce':
-            X = X[1, :, :, :]
-        elif self.modal == 'flair':
-            X = X[2, :, :, :]
-        elif self.modal == 't2':
-            X = X[3, :, :, :]
+        # if self.modal == 't1':
+        #     X = X[0, :, :, :]
+        # elif self.modal == 't1ce':
+        #     X = X[1, :, :, :]
+        # elif self.modal == 'flair':
+        #     X = X[2, :, :, :]
+        # elif self.modal == 't2':
+        #     X = X[3, :, :, :]
         return {"image": X,
                 "mask": y,
                 "id": self.files_id[item]}
@@ -47,7 +54,7 @@ class BratsDataset(data.Dataset):
         files_list = []
         for idx in range(len(grade)):
             files_list.append(os.path.join(os.getcwd(), folder, grade[idx], ids[idx]))
-        return files_list, ids
+        return pd.array(files_list), ids.values
 
     def _read_nii(self, path):
         data = nib.load(path)
@@ -55,12 +62,11 @@ class BratsDataset(data.Dataset):
         return data
 
     def read_and_preprocess(self, file):
-        X_path = [glob.glob(os.path.join(file, r"*" + x + r".nii.gz"))[0]
-                  for x in ["t1", "t1ce", "flair", "t2"]]
         X = []
-        for modal_path in X_path:
-            im = self._read_nii(modal_path)
-            im = self.normalize(im)
+        for x in self.modal:
+            path = glob.glob(os.path.join(file, r"*" + x + r".nii.gz"))[0]
+            im = self._read_nii(path)
+            im = self.normalize(im, modal=x)
             im = self.resize(im)
             X.append(im)
 
@@ -82,9 +88,13 @@ class BratsDataset(data.Dataset):
 
         return X, y
 
-    def normalize(self, data: np.ndarray):
-        data_min = np.min(data)
-        return (data - data_min) / (np.max(data) - data_min)
+    def normalize(self, data: np.ndarray, modal, offset=0.1, mul_factor=100):
+        avg, std = self.avg_std_values[modal + "_avg"], self.avg_std_values[modal + "_std"]
+        brain_index = np.nonzero(data)
+        norm_data = np.copy(data)
+        norm_data[brain_index] = mul_factor * \
+                                 (minmax_normalize((data[brain_index] - avg) / std) + offset)
+        return norm_data
 
     def resize(self, data: np.ndarray):
         data = resize(data, (78, 120, 120), preserve_range=True)
@@ -110,6 +120,43 @@ class BratsDataset(data.Dataset):
         mask = np.moveaxis(mask, (0, 1, 2, 3), (0, 3, 2, 1))
 
         return mask
+
+    def get_ds_stat(self, stat_file):
+        if os.path.exists(stat_file):
+            print("stat file found, load from pickle.")
+            with open(stat_file, "rb") as f:
+                mean_std_values = pickle.load(f)
+            return mean_std_values
+        if not os.path.exists(stat_file) and self.phase == "test":
+            raise FileNotFoundError("Constructing test dataloader, normalize stat file not found.")
+
+        print('Getting training set statistics...')
+        mean_std_values = {}
+        modals = ["t1", "t1ce", "flair", "t2"] if self.modal == "all" else self.modal
+        for x in modals:
+            im_tot, im_tot2 = [], []
+            print(f"Calculate mean and std for modal: {x}")
+
+            pbar = ProgressBar().start()
+            n_files = len(self.files)
+            for i, file in enumerate(self.files):
+                modal_path = glob.glob(os.path.join(file, r"*" + x + r".nii.gz"))[0]
+                im = self._read_nii(modal_path)
+                # some overflow problem here
+                im = im.astype(np.int32)
+                im_tot.append(np.mean(np.ravel(im)[np.flatnonzero(im)]))
+                im_tot2.append(np.mean(np.ravel(im)[np.flatnonzero(im)] ** 2))
+                pbar.update(int(i * 100 / (n_files - 1)))
+            pbar.finish()
+
+            im_avg = np.mean(np.array(im_tot))
+            im_std = np.sqrt(np.mean(np.array(im_tot2)) - im_avg ** 2)
+            mean_std_values[x + '_avg'] = im_avg
+            mean_std_values[x + '_std'] = im_std
+            print(f"mean={im_avg}, std={im_std}")
+        with open(stat_file, 'wb') as f:
+            pickle.dump(mean_std_values, f)
+        return mean_std_values
 
 
 if __name__ == "__main__":
