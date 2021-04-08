@@ -5,7 +5,8 @@ import os
 import shutil
 import warnings
 from BratsDataset import BratsDataset
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
 from torch.utils import data
 import torch.optim as optim
 import torch
@@ -13,9 +14,8 @@ import pandas as pd
 from torchvision.models.segmentation import fcn, deeplabv3
 import torchvision
 
-from net import unet3d
 from loss import DiceLoss
-from utils import epoch_train, epoch_validation
+from utils import epoch_train, epoch_validation, get_net
 
 
 def main(args):
@@ -28,35 +28,39 @@ def main(args):
     # split train set and test set
     train_idx, test_idx = train_test_split(list(range(df.shape[0])),
                                            test_size=args["testratio"],
-                                           random_state=args["seed"])
-    datasets = {x: BratsDataset(folder=args["input"],
-                                modal=args["modal"],
-                                fileidx=y,
-                                phase=x)
-                for (x, y) in [("train", train_idx), ("test", test_idx)]}
+                                           random_state=args["seed"],
+                                           stratify=df.Grade)
+    if args["use3d"]:
+        datasets = {x: BratsDataset(folder=args["input"],
+                                    modal=args["modal"],
+                                    fileidx=y,
+                                    phase=x)
+                    for (x, y) in [("train", train_idx), ("test", test_idx)]}
+        print(len(datasets["train"]))
+    else:
+        # TODO: 2d dataset
+        datasets = {x: BratsDataset(folder=args["input"],
+                                    modal=args["modal"],
+                                    fileidx=y,
+                                    phase=x)
+                    for (x, y) in [("train", train_idx), ("test", test_idx)]}
     n_modals = 4 if args["modal"] == "all" else 1
 
-    # Net config
-    if args["net"] == "unet3d":
-        # multimodal 3d-unet
-        model = unet3d.UNet3d(in_channels=n_modals, n_classes=3, n_channels=32).to(device)
-    else:
-        raise NotImplementedError("Net unfounded! Please check the input name and the net file.")
-
-    # Loss func
-    dice_loss = DiceLoss()
-
-    # optimizer
-    optimizer = optim.Adam(model.parameters(), lr=args["lr"])
-
     # k-fold cross-val
-    kf = KFold(args["nsplits"])
+    skf = StratifiedKFold(args["nsplits"])
     fold_counter = 1
-    for train_idx, val_idx in kf.split(datasets["train"]):
+    for sub_train_idx, val_idx in skf.split(datasets["train"], datasets["train"].grades):
         print(f"Fold [{fold_counter}/{args['nsplits']}]:")
-        print(f"Train: {train_idx.shape}, Val:{val_idx.shape}")
+        print(f"Train: {sub_train_idx.shape}, Val:{val_idx.shape}")
+        # Net config: utils.get_net
+        model = get_net(name=args["net"], n_modals=n_modals, device=device)
+        # Loss func
+        dice_loss = DiceLoss()
+        # optimizer
+        optimizer = optim.Adam(model.parameters(), lr=args["lr"])
+
         # k-fold
-        trainset = data.Subset(datasets["train"], train_idx)
+        trainset = data.Subset(datasets["train"], sub_train_idx)
         valset = data.Subset(datasets["train"], val_idx)
         train_dataloader = data.DataLoader(dataset=trainset,
                                            batch_size=args["bs"],

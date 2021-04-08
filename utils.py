@@ -1,11 +1,14 @@
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-
+from torchvision.models.segmentation import fcn, deeplabv3
+from net import unet3d
 from collections import OrderedDict
 import numpy as np
 import time
 from meters import AverageMeter, ProgressMeter
+
+N_CLASSES = 3
 
 
 # https://github.com/ellisdg/3DUnetCNN
@@ -47,7 +50,7 @@ def epoch_train(train_loader, model, criterion, optimizer, epoch, n_gpus=None, p
         end = time.time()
 
         if idx % print_freq == 0:
-            progress.display(idx)
+            progress.display(idx + 1)
     return losses.avg
 
 
@@ -203,17 +206,6 @@ def summary_string(model, input_size, batch_size=-1, device=torch.device('cuda:0
     return summary_str, (total_params, trainable_params)
 
 
-def calculate_stats(images):
-    """
-    Calculates min, max, mean, std given a list of ndarrays
-    """
-    # flatten first since the images might not be the same size
-    flat = np.concatenate(
-        [img.ravel() for img in images]
-    )
-    return np.min(flat), np.max(flat), np.mean(flat), np.std(flat)
-
-
 def minmax_normalize(img_npy):
     '''
     img_npy: ndarray
@@ -221,3 +213,11 @@ def minmax_normalize(img_npy):
     min_value = np.min(img_npy)
     max_value = np.max(img_npy)
     return (img_npy - min_value) / (max_value - min_value)
+
+
+def get_net(name, n_modals, device):
+    if name == "unet3d":
+        model = unet3d.UNet3d(in_channels=n_modals, n_classes=N_CLASSES, n_channels=32).to(device)
+    else:
+        raise NotImplementedError(f"{name} not found. Please check the spelling.")
+    return model

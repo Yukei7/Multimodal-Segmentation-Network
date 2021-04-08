@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import glob
 from skimage.transform import resize
-from transforms import get_augmentations
+from transforms import get_augmentations3d
 from progressbar import ProgressBar
 import pickle
 from utils import minmax_normalize
@@ -13,21 +13,27 @@ from utils import minmax_normalize
 
 class BratsDataset(data.Dataset):
     def __init__(self, folder, fileidx, stat_file="train_ds.pkl", modal='all', phase="train",
-                 offset=0.1, mul_factor=100):
+                 offset=0.1, mul_factor=100, final_patch=(78, 120, 120)):
+        self.folder = folder
         self.df = pd.read_csv(os.path.join(folder, "name_mapping.csv"))
         # get files path and related ids
-        self.files, self.files_id = self.get_file_list(folder)
+        self.files, self.files_id, self.grades = self.get_file_list(folder)
         assert modal in ['all', 't1', 't1ce', 'flair', 't2']
         assert phase in ["train", "test"]
         self.phase = phase
         self.modal = ['t1', 't1ce', 'flair', 't2'] if modal == 'all' else [modal]
         self.n_modals = len(self.modal)
         # get file from file idx
-        self.files, self.files_id = self.files[fileidx], self.files_id[fileidx]
+        self.files = self.files[fileidx]
+        self.files_id = self.files_id[fileidx]
+        self.grades = self.grades[fileidx]
         # get the stat for normalization
         self.avg_std_values = self.get_ds_stat(stat_file)
+        self.offset = offset
+        self.mul_factor = mul_factor
+        self.final_patch = final_patch
         # augmentation
-        self.transform = get_augmentations(self.phase, self.files)
+        self.transform = get_augmentations3d(self.phase)
 
     def __len__(self):
         return len(self.files)
@@ -35,15 +41,6 @@ class BratsDataset(data.Dataset):
     def __getitem__(self, item):
         file = self.files[item]
         X, y = self.read_and_preprocess(file)
-        # test for single modal and multimodal
-        # if self.modal == 't1':
-        #     X = X[0, :, :, :]
-        # elif self.modal == 't1ce':
-        #     X = X[1, :, :, :]
-        # elif self.modal == 'flair':
-        #     X = X[2, :, :, :]
-        # elif self.modal == 't2':
-        #     X = X[3, :, :, :]
         return {"image": X,
                 "mask": y,
                 "id": self.files_id[item]}
@@ -54,7 +51,7 @@ class BratsDataset(data.Dataset):
         files_list = []
         for idx in range(len(grade)):
             files_list.append(os.path.join(os.getcwd(), folder, grade[idx], ids[idx]))
-        return pd.array(files_list), ids.values
+        return pd.array(files_list), ids.values, grade.values
 
     def _read_nii(self, path):
         data = nib.load(path)
@@ -71,6 +68,7 @@ class BratsDataset(data.Dataset):
             X.append(im)
 
         X = np.array(X)
+        # [c, x, y, z]
         X = np.moveaxis(X, (0, 1, 2, 3), (0, 3, 2, 1))
         y_path = glob.glob(os.path.join(file, r"*seg.nii.gz"))[0]
         y = self._read_nii(y_path)
@@ -78,6 +76,7 @@ class BratsDataset(data.Dataset):
         y = np.clip(y.astype(np.uint8), 0, 1).astype(np.float32)
         y = np.clip(y, 0, 1)
         y = self.preprocess_mask_labels(y)
+        y = np.moveaxis(y, (0, 1, 2, 3), (0, 3, 2, 1))
 
         if self.transform and self.phase == "train":
             augmented = self.transform(image=X.astype(np.float32),
@@ -88,16 +87,16 @@ class BratsDataset(data.Dataset):
 
         return X, y
 
-    def normalize(self, data: np.ndarray, modal, offset=0.1, mul_factor=100):
+    def normalize(self, data: np.ndarray, modal):
         avg, std = self.avg_std_values[modal + "_avg"], self.avg_std_values[modal + "_std"]
         brain_index = np.nonzero(data)
         norm_data = np.copy(data)
-        norm_data[brain_index] = mul_factor * \
-                                 (minmax_normalize((data[brain_index] - avg) / std) + offset)
+        norm_data[brain_index] = self.mul_factor * \
+                                 (minmax_normalize((data[brain_index] - avg) / std) + self.offset)
         return norm_data
 
     def resize(self, data: np.ndarray):
-        data = resize(data, (78, 120, 120), preserve_range=True)
+        data = resize(data, self.final_patch, preserve_range=True)
         return data
 
     def preprocess_mask_labels(self, mask: np.ndarray):
@@ -117,17 +116,16 @@ class BratsDataset(data.Dataset):
         mask_ET[mask_ET == 4] = 1
 
         mask = np.stack([mask_WT, mask_TC, mask_ET])
-        mask = np.moveaxis(mask, (0, 1, 2, 3), (0, 3, 2, 1))
-
         return mask
 
     def get_ds_stat(self, stat_file):
-        if os.path.exists(stat_file):
-            print("stat file found, load from pickle.")
-            with open(stat_file, "rb") as f:
+        pkl_path = os.path.join(self.folder, stat_file)
+        if os.path.exists(pkl_path):
+            print(f"{self.phase}: stat file found, load from pickle.")
+            with open(pkl_path, "rb") as f:
                 mean_std_values = pickle.load(f)
             return mean_std_values
-        if not os.path.exists(stat_file) and self.phase == "test":
+        if not os.path.exists(pkl_path) and self.phase == "test":
             raise FileNotFoundError("Constructing test dataloader, normalize stat file not found.")
 
         print('Getting training set statistics...')
@@ -159,9 +157,19 @@ class BratsDataset(data.Dataset):
         return mean_std_values
 
 
+# TODO: 2d dataset class
+class BratsDataset2d(BratsDataset):
+    def __init__(self, folder, fileidx, stat_file="train_ds.pkl", modal='all', phase="train",
+                 offset=0.1, mul_factor=100, final_patch=(78, 120, 120)):
+        super(BratsDataset2d, self).__init__(folder, fileidx, stat_file, modal, phase, offset, mul_factor, final_patch)
+        self.imgs, self.labels = self.read_2d(self.files, self.modal)
+
+    def __len__(self):
+        return self.imgs.shape[0]
+
+    def read_wd(self, files, modal):
+        pass
+
+
 if __name__ == "__main__":
-    dataset = BratsDataset('brats19')
-    print(len(dataset))
-    sample = dataset[0]
-    print(sample.get("image").shape, sample.get("mask").shape, sample.get("id"))
-    print(type(sample.get("image")))
+    pass
