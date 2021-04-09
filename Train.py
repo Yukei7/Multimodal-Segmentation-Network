@@ -36,7 +36,6 @@ def main(args):
                                     fileidx=y,
                                     phase=x)
                     for (x, y) in [("train", train_idx), ("test", test_idx)]}
-        print(len(datasets["train"]))
     else:
         # TODO: 2d dataset
         datasets = {x: BratsDataset(folder=args["input"],

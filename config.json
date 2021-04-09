@@ -6,11 +6,11 @@
   "epoch": 50,
   "net": "unet3d",
   "use3d": true,
-  "lr": 1e-3,
+  "lr": 5e-4,
   "ngpus": 1,
   "log": "log.csv",
   "modelpath": "checkpoint",
   "bs": 4,
-  "num_workers": 24,
+  "num_workers": 32,
   "modal": "all"
 }

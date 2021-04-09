@@ -86,7 +86,7 @@ def epoch_validation(val_loader, model, criterion, n_gpus=None, print_freq=1):
             end = time.time()
 
             if idx % print_freq == 0:
-                progress.display(idx)
+                progress.display(idx + 1)
     return losses.avg
 
 

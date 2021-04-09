@@ -13,7 +13,7 @@ from utils import minmax_normalize
 
 class BratsDataset(data.Dataset):
     def __init__(self, folder, fileidx, stat_file="train_ds.pkl", modal='all', phase="train",
-                 offset=0.1, mul_factor=100, final_patch=(78, 120, 120)):
+                 offset=0.1, mul_factor=100, patch_size=(78, 120, 120)):
         self.folder = folder
         self.df = pd.read_csv(os.path.join(folder, "name_mapping.csv"))
         # get files path and related ids
@@ -31,9 +31,8 @@ class BratsDataset(data.Dataset):
         self.avg_std_values = self.get_ds_stat(stat_file)
         self.offset = offset
         self.mul_factor = mul_factor
-        self.final_patch = final_patch
         # augmentation
-        self.transform = get_augmentations3d(self.phase)
+        self.transform = get_augmentations3d(self.phase, patch_size=patch_size)
 
     def __len__(self):
         return len(self.files)
@@ -64,7 +63,6 @@ class BratsDataset(data.Dataset):
             path = glob.glob(os.path.join(file, r"*" + x + r".nii.gz"))[0]
             im = self._read_nii(path)
             im = self.normalize(im, modal=x)
-            im = self.resize(im)
             X.append(im)
 
         X = np.array(X)
@@ -72,18 +70,15 @@ class BratsDataset(data.Dataset):
         X = np.moveaxis(X, (0, 1, 2, 3), (0, 3, 2, 1))
         y_path = glob.glob(os.path.join(file, r"*seg.nii.gz"))[0]
         y = self._read_nii(y_path)
-        y = self.resize(y)
         y = np.clip(y.astype(np.uint8), 0, 1).astype(np.float32)
         y = np.clip(y, 0, 1)
         y = self.preprocess_mask_labels(y)
         y = np.moveaxis(y, (0, 1, 2, 3), (0, 3, 2, 1))
 
         if self.transform and self.phase == "train":
-            augmented = self.transform(image=X.astype(np.float32),
-                                       mask=y.astype(np.float32))
-
-            X = augmented['image']
-            y = augmented['mask']
+            data = {'image': X, 'mask': y}
+            aug_data = self.transform(**data)
+            X, y = aug_data['image'], aug_data['mask']
 
         return X, y
 
@@ -94,10 +89,6 @@ class BratsDataset(data.Dataset):
         norm_data[brain_index] = self.mul_factor * \
                                  (minmax_normalize((data[brain_index] - avg) / std) + self.offset)
         return norm_data
-
-    def resize(self, data: np.ndarray):
-        data = resize(data, self.final_patch, preserve_range=True)
-        return data
 
     def preprocess_mask_labels(self, mask: np.ndarray):
         mask_WT = mask.copy()

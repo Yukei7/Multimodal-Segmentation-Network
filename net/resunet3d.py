@@ -5,10 +5,11 @@ import torch.nn.functional as F
 
 
 class DoubleConv(nn.Module):
-    """(Conv3D -> BN -> ReLU) * 2"""
+    """Conv3D -> BN -> ReLU -> Conv3D -> BN -> (Cat Residual) -> ReLU"""
 
-    def __init__(self, in_channels, out_channels, num_groups=8):
+    def __init__(self, in_channels, out_channels, num_groups=8, use_res=False):
         super().__init__()
+        self.use_res = use_res
         self.double_conv = nn.Sequential(
             nn.Conv3d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
             # nn.BatchNorm3d(out_channels),
@@ -20,9 +21,22 @@ class DoubleConv(nn.Module):
             nn.GroupNorm(num_groups=num_groups, num_channels=out_channels),
             nn.ReLU(inplace=True)
         )
+        self.res_double_conv_0 = nn.Sequential(
+            nn.Conv3d(in_channels, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(num_groups=num_groups, num_channels=out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(out_channels, out_channels, kernel_size=3, stride=1, padding=1),
+            nn.GroupNorm(num_groups=num_groups, num_channels=out_channels),
+        )
 
     def forward(self, x):
-        return self.double_conv(x)
+        if not self.use_res:
+            return self.double_conv(x)
+        else:
+            res = x
+            x = self.res_double_conv_0(x)
+            x = torch.cat([x, res], dim=1)
+            return nn.ReLU
 
 
 class Down(nn.Module):
@@ -36,6 +50,15 @@ class Down(nn.Module):
 
     def forward(self, x):
         return self.encoder(x)
+
+
+class ResBlock3d(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.res = nn.Conv3d(in_channels, out_channels, kernel_size=1, stride=1, padding=1)
+
+    def forward(self, x):
+        return self.res(x)
 
 
 class Up(nn.Module):
@@ -71,7 +94,7 @@ class Out(nn.Module):
         return self.conv(x)
 
 
-class UNet3d(nn.Module):
+class ResUNet3d(nn.Module):
     def __init__(self, in_channels, n_classes, n_channels):
         super().__init__()
         self.in_channels = in_channels
@@ -82,11 +105,11 @@ class UNet3d(nn.Module):
         self.enc1 = Down(n_channels, 2 * n_channels)
         self.enc2 = Down(2 * n_channels, 4 * n_channels)
         self.enc3 = Down(4 * n_channels, 8 * n_channels)
-        self.enc4 = Down(8 * n_channels, 8 * n_channels)
+        self.enc4 = Down(8 * n_channels, 16 * n_channels)
 
-        self.dec1 = Up(16 * n_channels, 4 * n_channels)
-        self.dec2 = Up(8 * n_channels, 2 * n_channels)
-        self.dec3 = Up(4 * n_channels, n_channels)
+        self.dec1 = Up(16 * n_channels, 8 * n_channels)
+        self.dec2 = Up(8 * n_channels, 4 * n_channels)
+        self.dec3 = Up(4 * n_channels, 2 * n_channels)
         self.dec4 = Up(2 * n_channels, n_channels)
         self.out = Out(n_channels, n_classes)
 
@@ -108,7 +131,7 @@ class UNet3d(nn.Module):
 def main():
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda:0" if use_cuda else "cpu")
-    model = UNet3d(4, 3, n_channels=24).to(device)
+    model = ResUNet3d(4, 3, n_channels=24).to(device)
     # batch, channel, x, y, z
     x = torch.rand(4, 4, 64, 96, 96)
     x = x.to(device)

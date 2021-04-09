@@ -1,8 +1,8 @@
 # image folder
-brats19/
-brats19_h5/
+/brats19/
+/brats19_h5/
 # experiment files
-experiment/
+/experiment/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
