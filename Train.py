@@ -1,9 +1,9 @@
 import json
-import pandas as pd
 import numpy as np
 import os
 import shutil
 import warnings
+import time
 from BratsDataset import BratsDataset
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
@@ -11,9 +11,6 @@ from torch.utils import data
 import torch.optim as optim
 import torch
 import pandas as pd
-from torchvision.models.segmentation import fcn, deeplabv3
-import torchvision
-
 from loss import DiceLoss
 from utils import epoch_train, epoch_validation, get_net
 
@@ -49,7 +46,8 @@ def main(args):
     skf = StratifiedKFold(args["nsplits"])
     fold_counter = 1
     for sub_train_idx, val_idx in skf.split(datasets["train"], datasets["train"].grades):
-        print(f"Fold [{fold_counter}/{args['nsplits']}]:")
+        time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        print(f"Fold [{fold_counter}/{args['nsplits']}] Start at {time_str}")
         print(f"Train: {sub_train_idx.shape}, Val:{val_idx.shape}")
         # Net config: utils.get_net
         model = get_net(name=args["net"], n_modals=n_modals, device=device)

@@ -44,11 +44,11 @@ class Up(nn.Module):
 
         if trilinear:
             self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
+            self.conv = DoubleConv(in_channels + in_channels // 2, out_channels)
         else:
             self.up = nn.ConvTranspose3d(in_channels, in_channels // 2, kernel_size=3, stride=2,
                                          padding=1, output_padding=1)
-
-        self.conv = DoubleConv(in_channels, out_channels)
+            self.conv = DoubleConv(in_channels, out_channels)
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
