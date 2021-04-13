@@ -13,7 +13,7 @@ from utils import minmax_normalize
 
 class BratsDataset(data.Dataset):
     def __init__(self, folder, fileidx, stat_file="train_ds.pkl", modal='all', phase="train",
-                 offset=0.1, mul_factor=100, patch_size=(78, 120, 120)):
+                 offset=0.1, mul_factor=100, patch_size=(78, 120, 120), augmentation=False):
         self.folder = folder
         self.df = pd.read_csv(os.path.join(folder, "name_mapping.csv"))
         # get files path and related ids
@@ -32,7 +32,11 @@ class BratsDataset(data.Dataset):
         self.offset = offset
         self.mul_factor = mul_factor
         # augmentation
-        self.transform = get_augmentations3d(self.phase, patch_size=patch_size)
+        self.patch_size = patch_size
+        if augmentation:
+            self.transform = get_augmentations3d(self.phase, patch_size=patch_size)
+        else:
+            self.transform = None
 
     def __len__(self):
         return len(self.files)
@@ -55,6 +59,10 @@ class BratsDataset(data.Dataset):
     def _read_nii(self, path):
         data = nib.load(path)
         data = np.asarray(data.dataobj)
+        return data
+
+    def resize(self, data: np.ndarray):
+        data = resize(data, self.patch_size, preserve_range=True)
         return data
 
     def read_and_preprocess(self, file):

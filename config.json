@@ -4,13 +4,13 @@
   "testratio": 0.2,
   "nsplits": 4,
   "epoch": 50,
-  "net": "unet3d",
+  "net": "attvnet",
   "use3d": true,
-  "lr": 5e-4,
+  "lr": 1e-4,
   "ngpus": 1,
   "log": "log.csv",
   "modelpath": "checkpoint",
-  "bs": 4,
-  "num_workers": 32,
+  "bs": 2,
+  "num_workers": 16,
   "modal": "all"
 }

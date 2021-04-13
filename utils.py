@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from torchvision.models.segmentation import fcn, deeplabv3
-from net import unet3d
+from net import unet3d, resunet3d, attvnet
 from collections import OrderedDict
 import numpy as np
 import time
@@ -218,6 +218,10 @@ def minmax_normalize(img_npy):
 def get_net(name, n_modals, device):
     if name == "unet3d":
         model = unet3d.UNet3d(in_channels=n_modals, n_classes=N_CLASSES, n_channels=32).to(device)
+    elif name == "resunet3d":
+        model = resunet3d.ResUNet3d(in_channels=n_modals, n_classes=N_CLASSES, n_channels=8).to(device)
+    elif name == "attvnet":
+        model = attvnet.AttVNet(in_channels=n_modals, n_classes=N_CLASSES, n_channels=8).to(device)
     else:
         raise NotImplementedError(f"{name} not found. Please check the spelling.")
     return model

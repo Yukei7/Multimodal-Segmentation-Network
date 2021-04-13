@@ -13,6 +13,7 @@ import torch
 import pandas as pd
 from loss import DiceLoss
 from utils import epoch_train, epoch_validation, get_net
+import pickle
 
 
 def main(args):
@@ -23,23 +24,33 @@ def main(args):
     # get number of samples
     df = pd.read_csv(os.path.join(args["input"], "name_mapping.csv"))
     # split train set and test set
-    train_idx, test_idx = train_test_split(list(range(df.shape[0])),
-                                           test_size=args["testratio"],
-                                           random_state=args["seed"],
-                                           stratify=df.Grade)
+    if os.path.exists(os.path.join(args["input"], "index.pkl")):
+        with open(os.path.join(args["input"], "index.pkl"), "rb") as f:
+            train_idx, test_idx = pickle.load(f)
+    else:
+        train_idx, test_idx = train_test_split(list(range(df.shape[0])),
+                                               test_size=args["testratio"],
+                                               random_state=args["seed"],
+                                               stratify=df.Grade)
+        # save the index
+        with open(os.path.join(args["input"], "index.pkl"), "wb") as f:
+            pickle.dump((train_idx, test_idx), f)
+
     if args["use3d"]:
         datasets = {x: BratsDataset(folder=args["input"],
                                     modal=args["modal"],
                                     fileidx=y,
-                                    phase=x)
-                    for (x, y) in [("train", train_idx), ("test", test_idx)]}
+                                    phase=x,
+                                    augmentation=True)
+                    for (x, y) in [("train", train_idx)]}
+        # for (x, y) in [("train", train_idx), ("test", test_idx)]}
     else:
         # TODO: 2d dataset
         datasets = {x: BratsDataset(folder=args["input"],
                                     modal=args["modal"],
                                     fileidx=y,
                                     phase=x)
-                    for (x, y) in [("train", train_idx), ("test", test_idx)]}
+                    for (x, y) in [("train", train_idx)]}
     n_modals = 4 if args["modal"] == "all" else 1
 
     # k-fold cross-val
@@ -75,7 +86,6 @@ def main(args):
               optimizer=optimizer,
               criterion=dice_loss,
               n_epochs=args["epoch"],
-              fold_count=fold_counter,
               training_loader=train_dataloader,
               validation_loader=val_dataloader,
               n_gpus=args["ngpus"],
@@ -98,7 +108,7 @@ def init():
 
 
 def train(model, optimizer, criterion, n_epochs, training_loader, validation_loader,
-          training_log_filename, fold_count, metric_to_monitor="val_loss", n_gpus=1,
+          training_log_filename, metric_to_monitor="val_loss", n_gpus=1,
           decay_factor=0.5, lr_decay_step=2, min_lr=1e-7, model_filename=None,
           use_scheduler=True):
     # Train Log
